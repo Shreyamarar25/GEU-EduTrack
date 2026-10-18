@@ -1,0 +1,5 @@
+Django>=4.2
+djangorestframework>=3.14
+django-cors-headers>=4.3
+# only needed when you switch to MySQL:
+PyMySQL>=1.1
