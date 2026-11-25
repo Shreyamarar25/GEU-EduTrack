@@ -22,6 +22,8 @@ urlpatterns = [
     path("reports/requests/<int:process_id>/download/", views.ReportRequestDownload.as_view()),
     path("scheduler/run/", views.RunScheduler.as_view()),
     path("scheduler/reset/", views.ResetScheduler.as_view()),
+    path("scheduler/finish/", views.FinishTask.as_view()),
     path("scheduler/simulate/", views.SimulateScheduler.as_view()),
+    path("os/", include("scheduler.api_urls")),
     path("", include(router.urls)),
 ]
