@@ -1,3 +1,5 @@
+import threading
+
 from django.contrib.auth import authenticate
 from django.db import transaction
 from django.db.models import Avg, Count, Max, Q
@@ -10,6 +12,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from scheduler.scheduler import schedule, ALGORITHMS
+from scheduler.live import check_start, check_finish, to_text
 from django.http import HttpResponse
 from django.utils import timezone
 from . import pdf_reports
@@ -381,6 +384,12 @@ def _pdf_response(pdf, name):
 
 
 # ------------------------------------------------ report download requests
+# Mutex for the os_process queue: only one request (or, later, one scheduler run)
+# changes the queue at a time.
+QUEUE_LOCK = threading.Lock()
+QUEUE_CAPACITY = 5   # slots in the request queue (the bounded buffer)
+
+
 class ReportRequestCreate(APIView):
     """POST {kind: attendance|performance|student, student_id?}
     Admin: gets the PDF instantly. Everyone else: a READY row is added to os_process
@@ -398,28 +407,36 @@ class ReportRequestCreate(APIView):
 
         student = authorize_report(request.user, kind, student_id)  # reject bad requests now
 
-        # Same report asked again while it is still waiting -> return the existing request
-        dup = OsProcess.objects.filter(requested_by=request.user, report_kind=kind,
-                                       report_student=student, state="READY").first()
-        if dup:
-            return Response(ReportRequestSerializer(dup).data, status=200)
+        with QUEUE_LOCK, transaction.atomic():
+            # Same report asked again while it is still waiting -> return the existing request
+            dup = OsProcess.objects.filter(requested_by=request.user, report_kind=kind,
+                                           report_student=student, state__in=["READY", "WAITING"]).first()
+            if dup:
+                return Response(ReportRequestSerializer(dup).data, status=200)
 
-        # Arrival time = order in which requests were clicked (0, 1, 2, ...)
-        last = OsProcess.objects.filter(state="READY").aggregate(m=Max("arrival_time"))["m"]
-        title = REPORT_TITLE[kind] + (f" - {student.name}" if student else "")
-        proc = OsProcess.objects.create(
-            task_name=f"{title} ({request.user.username}, {role})",
-            task_type=f"{kind.upper()}_REPORT",
-            arrival_time=0 if last is None else last + 1,
-            burst_time=REPORT_BURST[kind],
-            priority=ROLE_PRIORITY.get(role, 4),
-            state="READY",
-            requested_by=request.user, report_kind=kind, report_student=student)
+            # Producer-consumer: the queue has limited slots, so refuse when it is full
+            waiting = OsProcess.objects.filter(state__in=["READY", "WAITING"],
+                                               requested_by__isnull=False).count()
+            if waiting >= QUEUE_CAPACITY:
+                raise ValidationError({"detail": f"The request queue is full ({waiting}/{QUEUE_CAPACITY}). "
+                                                 "Please try again after the Admin processes some requests."})
+
+            # Arrival time = order in which requests were clicked (0, 1, 2, ...)
+            last = OsProcess.objects.filter(state__in=["READY", "WAITING"]).aggregate(m=Max("arrival_time"))["m"]
+            title = REPORT_TITLE[kind] + (f" - {student.name}" if student else "")
+            proc = OsProcess.objects.create(
+                task_name=f"{title} ({request.user.username}, {role})",
+                task_type=f"{kind.upper()}_REPORT",
+                arrival_time=0 if last is None else last + 1,
+                burst_time=REPORT_BURST[kind],
+                priority=ROLE_PRIORITY.get(role, 4),
+                state="READY",
+                requested_by=request.user, report_kind=kind, report_student=student)
         return Response(ReportRequestSerializer(proc).data, status=201)
 
 
 class MyReportRequests(APIView):
-    """GET -> the logged-in user's own requests, each marked Waiting or Approved."""
+    """GET -> the logged-in user's own requests, with their current status."""
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
@@ -443,19 +460,30 @@ class ReportRequestDownload(APIView):
 
 # ------------------------------------------------------- run / reset scheduler
 class RunScheduler(APIView):
-    """POST {algorithm} -> runs the algorithm on every waiting (READY) request, but approves
-    only the ONE it schedules first: that row becomes COMPLETED and saves its CT/WT/TAT.
-    The others stay READY until the next click."""
+    """POST {algorithm} -> runs the algorithm on every waiting (READY) request and takes the ONE
+    it schedules first. If its resources are free and the Banker's algorithm says the state stays
+    safe, that task becomes RUNNING and holds its starting resources. Otherwise it is held back
+    as WAITING, with the reason, until a running task finishes."""
     permission_classes = [RolePermission]
     read_roles = [ADMIN]
     write_roles = [ADMIN]
 
     def post(self, request):
+        with QUEUE_LOCK, transaction.atomic():
+            out = self._run(request)
+        if out["started"] is None:   # raised after the block above, so the WAITING mark stays saved
+            raise ValidationError({"detail": out["message"]})
+        return Response(out)
+
+    def _run(self, request):
         algo = str(request.data.get("algorithm", "FCFS")).upper()
         if algo not in ALGORITHMS:
             raise ValidationError({"algorithm": f"Use one of {ALGORITHMS}"})
         procs = list(OsProcess.objects.filter(state="READY").order_by("arrival_time", "process_id"))
         if not procs:
+            if OsProcess.objects.filter(state="WAITING").exists():
+                raise ValidationError({"detail": "Every task left in the queue is held back (WAITING). "
+                                                 "Finish a running task first."})
             raise ValidationError({"detail": "No waiting requests in the queue."})
 
         # The Admin clicks when every request is already waiting, so all of them are "here" at time 0.
@@ -473,26 +501,65 @@ class RunScheduler(APIView):
         for r in out["results"]:
             r["task_name"] = names[r["pid"]]
 
-        # the request the algorithm runs first = the one that completes first
         first = min(out["results"], key=lambda r: r["completion"])
-        OsProcess.objects.filter(pk=int(first["pid"][1:])).update(
-            state="COMPLETED", completion_time=first["completion"],
-            waiting_time=first["waiting"], turnaround_time=first["turnaround"],
-            approved_at=timezone.now())
+        task = next(p for p in procs if f"P{p.process_id}" == first["pid"])
+        ok, reason, hold = check_start(task)   # resources free? and safe by Banker's algorithm?
+        if not ok:
+            # held back: set it aside as WAITING, so the next click can try another task
+            OsProcess.objects.filter(pk=task.process_id).update(state="WAITING")
+            return {"started": None,
+                    "message": f"{task.task_name} is held back (WAITING). {reason} "
+                               "It returns to the queue when a running task finishes."}
+        OsProcess.objects.filter(pk=task.process_id).update(
+            state="RUNNING", started_at=timezone.now(), held=to_text(hold),
+            completion_time=first["completion"],
+            waiting_time=first["waiting"], turnaround_time=first["turnaround"])
 
-        out["approved"] = {"pid": first["pid"], "task_name": first["task_name"]}
+        out["started"] = {"pid": first["pid"], "task_name": first["task_name"]}
+        out["approved"] = out["started"]  # kept so the current Admin page still shows its message
         out["comparison"] = comparison
-        return Response(out)
+        return out
 
 
 class ResetScheduler(APIView):
-    """POST -> puts every process back to READY and clears CT/WT/TAT and the approval time."""
+    """POST -> puts the sample tasks (rows with no requester) back to READY and clears their
+    CT/WT/TAT, times and held resources. Real report requests are left alone."""
     permission_classes = [RolePermission]
     read_roles = [ADMIN]
     write_roles = [ADMIN]
 
     def post(self, request):
-        n = OsProcess.objects.update(state="READY", completion_time=None,
-                                     waiting_time=None, turnaround_time=None,
-                                     approved_at=None)
+        with QUEUE_LOCK, transaction.atomic():
+            n = OsProcess.objects.filter(requested_by__isnull=True).update(
+                state="READY", completion_time=None, waiting_time=None,
+                turnaround_time=None, approved_at=None, started_at=None, held="0,0,0")
         return Response({"reset": n})
+
+
+class FinishTask(APIView):
+    """POST {process_id} -> a RUNNING task collects the rest of its resources and finishes:
+    it becomes COMPLETED (approved), gives every resource back, and held-back tasks return
+    to the queue. If another running task holds what it needs, it cannot finish yet."""
+    permission_classes = [RolePermission]
+    read_roles = [ADMIN]
+    write_roles = [ADMIN]
+
+    def post(self, request):
+        try:
+            pid = int(request.data.get("process_id"))
+        except (TypeError, ValueError):
+            raise ValidationError({"process_id": "Send the number of a running task."})
+        with QUEUE_LOCK, transaction.atomic():
+            proc = OsProcess.objects.filter(pk=pid, state="RUNNING").first()
+            if not proc:
+                raise ValidationError({"detail": "That task is not running."})
+            ok, reason = check_finish(proc)   # it must collect the rest of its resources first
+            if not ok:
+                raise ValidationError({"detail": f"{proc.task_name} cannot finish yet. {reason}"})
+            proc.state = "COMPLETED"
+            proc.approved_at = timezone.now()
+            proc.held = "0,0,0"               # finished: everything it held goes back to the pool
+            proc.save(update_fields=["state", "approved_at", "held"])
+            # resources are free again, so held-back tasks get another chance
+            OsProcess.objects.filter(state="WAITING").update(state="READY")
+        return Response({"finished": proc.process_id, "task_name": proc.task_name})
