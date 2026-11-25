@@ -488,7 +488,7 @@ PAGES.scheduler = async el => {
 PAGES.scheduler = async el => {
   const types = ["ATTENDANCE_REPORT", "MARKS_REPORT", "STUDENT_REPORT", "COURSE_SUMMARY", "NOTIFICATION"];
   el.innerHTML = `<h2>OS Scheduler</h2>
-        <div class="panel"><h3>Waiting for approval</h3>
+        <div class="panel"><h3>Queue: waiting and running tasks</h3>
       <div id="queue"></div>
       <div class="toolbar" style="margin-top:12px">
         <select id="algo" style="max-width:240px">
@@ -496,7 +496,7 @@ PAGES.scheduler = async el => {
           <option value="SJF">SJF (non-preemptive)</option>
           <option value="PRIORITY">Priority (non-preemptive)</option>
         </select>
-        <button id="run">Run scheduler</button>
+        <button id="run">Start next task</button>
         <button class="secondary" id="reset">Reset queue</button>
       </div>
       <div id="schMsg"></div></div>
@@ -525,7 +525,9 @@ PAGES.scheduler = async el => {
       { key: "requested_by_name", label: "Requested by" },
       { key: "arrival_time", label: "AT" }, { key: "burst_time", label: "BT" }, { key: "priority", label: "Priority" },
       { key: "state", label: "State" }],
-      waiting, r => `<button class="danger" data-del="${r.process_id}">Delete</button>`);
+      waiting, r => r.state === "RUNNING"
+      ? `<button data-finish="${r.process_id}">Finish</button>`
+      : `<button class="danger" data-del="${r.process_id}">Delete</button>`);
 
     // Table 2: approved requests, in the order they were approved
     el.querySelector("#doneQueue").innerHTML = `<div class="panel"><h3>Completed requests (in the order they were approved)</h3>${buildTable([
@@ -536,8 +538,20 @@ PAGES.scheduler = async el => {
       { label: "Approved at", fmt: r => r.approved_at ? esc(new Date(r.approved_at).toLocaleString("en-IN")) : "-" }],
       done)}</div>`;
 
+    el.querySelectorAll("[data-finish]").forEach(b => b.onclick = async () => {
+      try {
+        await api("/scheduler/finish/", "POST", { process_id: b.dataset.finish });
+        notify(msg, "Task finished. The requester can now download the report.", true);
+        loadQueue();
+      } catch (e) { notify(msg, e.message); }
+    });  
     el.querySelectorAll("[data-del]").forEach(b => b.onclick = async () => {
       try { await api("/processes/" + b.dataset.del + "/", "DELETE"); loadQueue(); }
+      catch (e) { notify(msg, e.message); }
+    });
+
+    el.querySelectorAll("[data-finish]").forEach(b => b.onclick = async () => {
+      try { await api("/scheduler/finish/", "POST", { process_id: b.dataset.finish }); loadQueue(); }
       catch (e) { notify(msg, e.message); }
     });
   }
@@ -576,6 +590,7 @@ PAGES.scheduler = async el => {
           `<span>t=${t.time}: ${esc(t.pid)} &rarr; ${t.state}</span>`).join("")}</div></div>
         <div class="panel"><h3>Algorithm comparison</h3>${buildTable([
           { key: "algorithm", label: "Algorithm" }, { key: "avg_waiting", label: "Avg WT" }, { key: "avg_turnaround", label: "Avg TAT" }], r.comparison)}</div>`;
+      notify(msg, `${r.started.task_name} is now RUNNING. Click Finish when it is done.`, true);
       loadQueue();
     } catch (e) { notify(msg, e.message); }
   };
