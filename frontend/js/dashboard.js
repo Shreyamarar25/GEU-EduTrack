@@ -3,13 +3,13 @@ if (!auth.token) window.location.href = "index.html";
 
 // Which pages each role can open (matches the "Relevant diagrams" feature table)
 const MENUS = {
-  ADMIN:    ["overview", "students", "teachers", "courses", "enrollments", "attendance", "marks", "reports", "scheduler"],
+  ADMIN:    ["overview", "students", "teachers", "courses", "enrollments", "attendance", "marks", "reports", "scheduler", "sync", "deadlock"],
   TEACHER:  ["overview", "courses", "attendance", "marks", "reports"],
   STUDENT:  ["overview", "courses", "attendance", "marks", "reports"],
   EXAMCELL: ["overview", "marks", "reports"],
 };
 const LABELS = { overview: "Overview", students: "Students", teachers: "Teachers", courses: "Courses",
-  enrollments: "Enrollment", attendance: "Attendance", marks: "Marks", reports: "Reports", scheduler: "OS Scheduler" };
+  enrollments: "Enrollment", attendance: "Attendance", marks: "Marks", reports: "Reports", scheduler: "OS Scheduler", sync: "Synchronization", deadlock: "Deadlock" };
 
 document.getElementById("who").textContent = `${auth.name} (${auth.role})`;
 document.getElementById("logoutBtn").onclick = logout;
