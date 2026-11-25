@@ -103,3 +103,10 @@ Demo logins: `admin/admin123`, `teacher1/teacher123`, `student1/student123`, `ex
 | Testing, final reports, demo | Done |
 
 All planned modules are complete. Phase 1 covered design, Phase 2 covered the core backend and scheduler, and Phase 3 added the OS concepts, integration and final polish.
+
+## Features
+- Role-based login and dashboards for Admin, Teacher, Student and Exam Cell
+- Manage students, teachers, courses, enrollments, attendance and marks
+- Attendance and performance reports, downloadable as PDF
+- Report requests go through an OS scheduler queue (FCFS, SJF, Priority) and are approved by the Admin
+- Deadlock and Synchronization pages for the Admin
