@@ -128,3 +128,12 @@ All planned modules are complete. Phase 1 covered design, Phase 2 covered the co
 | `reports/request/`, `reports/requests/` | Request a report and see your requests |
 | `scheduler/run/`, `scheduler/finish/`, `scheduler/reset/` | Admin runs and finishes queued tasks |
 | `os/deadlock/...`, `os/sync/...` | Deadlock and synchronization demos |
+
+## Team InnoVision (T256)
+| Member | Role |
+|---|---|
+| Rithisha | Team Lead, DBMS and Backend |
+| Vanshika | Frontend and User Management |
+| Shreya | OS and Scheduling |
+
+Mentor: Mr Sharath K
