@@ -103,7 +103,8 @@ class Marks(models.Model):
 class OsProcess(models.Model):
     """System tasks (report generation, notifications...) that the OS scheduler will process.
     Phase 2: table + API exist. Reading/writing it from the scheduler = Phase 3 (OS-DBMS integration)."""
-    STATES = [("NEW", "NEW"), ("READY", "READY"), ("RUNNING", "RUNNING"), ("COMPLETED", "COMPLETED")]
+    STATES = [("NEW", "NEW"), ("READY", "READY"), ("WAITING", "WAITING"),
+             ("RUNNING", "RUNNING"), ("COMPLETED", "COMPLETED")]
     process_id = models.AutoField(primary_key=True)
     task_name = models.CharField(max_length=100)
     task_type = models.CharField(max_length=50, default="REPORT")
@@ -119,7 +120,9 @@ class OsProcess(models.Model):
                                      related_name="report_requests")
     report_kind = models.CharField(max_length=20, blank=True)  # attendance / performance / student
     report_student = models.ForeignKey(Student, on_delete=models.SET_NULL, null=True, blank=True)
-    approved_at = models.DateTimeField(null=True, blank=True)  # when the Admin's run approved it
+    approved_at = models.DateTimeField(null=True, blank=True) 
+    started_at = models.DateTimeField(null=True, blank=True) 
+    held = models.CharField(max_length=20, default="0,0,0")   # resources held now: PDF engine, DB connection, Table lock # when the task began RUNNING # when the Admin's run approved it
 
     class Meta:
         db_table = "os_process"
