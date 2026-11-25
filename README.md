@@ -119,3 +119,12 @@ All planned modules are complete. Phase 1 covered design, Phase 2 covered the co
 | Deadlock detection and Banker's algorithm | `scheduler/deadlock.py`, `scheduler/live.py`, Deadlock page |
 | Mutex and race condition | `scheduler/synchronization.py`, Synchronization page |
 | Producer-consumer (bounded buffer) | report request queue (max 5 waiting requests) |
+
+## Main API endpoints (prefix `/api/`)
+| Endpoint | Purpose |
+|---|---|
+| `auth/login/` | Log in and get a token |
+| `students/`, `teachers/`, `courses/`, `enrollments/`, `attendance/`, `marks/` | CRUD for academic data |
+| `reports/request/`, `reports/requests/` | Request a report and see your requests |
+| `scheduler/run/`, `scheduler/finish/`, `scheduler/reset/` | Admin runs and finishes queued tasks |
+| `os/deadlock/...`, `os/sync/...` | Deadlock and synchronization demos |
