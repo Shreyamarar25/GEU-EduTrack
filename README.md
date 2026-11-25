@@ -110,3 +110,12 @@ All planned modules are complete. Phase 1 covered design, Phase 2 covered the co
 - Attendance and performance reports, downloadable as PDF
 - Report requests go through an OS scheduler queue (FCFS, SJF, Priority) and are approved by the Admin
 - Deadlock and Synchronization pages for the Admin
+
+## OS concepts used
+| Concept | Where |
+|---|---|
+| CPU scheduling (FCFS, SJF, Priority) | `scheduler/scheduler.py`, OS Scheduler page |
+| Process states (NEW, READY, WAITING, RUNNING, COMPLETED) | `OsProcess` model |
+| Deadlock detection and Banker's algorithm | `scheduler/deadlock.py`, `scheduler/live.py`, Deadlock page |
+| Mutex and race condition | `scheduler/synchronization.py`, Synchronization page |
+| Producer-consumer (bounded buffer) | report request queue (max 5 waiting requests) |
