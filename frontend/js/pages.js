@@ -549,11 +549,6 @@ PAGES.scheduler = async el => {
       try { await api("/processes/" + b.dataset.del + "/", "DELETE"); loadQueue(); }
       catch (e) { notify(msg, e.message); }
     });
-
-    el.querySelectorAll("[data-finish]").forEach(b => b.onclick = async () => {
-      try { await api("/scheduler/finish/", "POST", { process_id: b.dataset.finish }); loadQueue(); }
-      catch (e) { notify(msg, e.message); }
-    });
   }
 
   el.querySelector("#pForm").onsubmit = async ev => {
