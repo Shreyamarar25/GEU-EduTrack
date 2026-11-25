@@ -123,7 +123,8 @@ class ReportRequestSerializer(serializers.ModelSerializer):
                   "turnaround_time"]
 
     def get_status(self, obj):
-        return "Approved" if obj.state == "COMPLETED" else "Waiting"
+        return {"COMPLETED": "Approved", "RUNNING": "Running",
+                "WAITING": "Held back"}.get(obj.state, "Waiting")
 
     def get_can_download(self, obj):
         return obj.state == "COMPLETED"
